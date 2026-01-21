@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: water_quality
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - analytics_net
+
+  redash_postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: redash
+      POSTGRES_PASSWORD: redash_password
+      POSTGRES_DB: redash
+    networks:
+      - analytics_net
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - analytics_net
+
+  redash_server:
+    image: redash/redash:10.1.0.b50633
+    depends_on:
+      - redash_postgres
+      - redis
+    ports:
+      - "5000:5000"
+    environment:
+      REDASH_DATABASE_URL: "postgresql://redash:redash_password@redash_postgres/redash"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      REDASH_COOKIE_SECRET: "SECURE_COOKIE_SECRET"
+      REDASH_SECRET_KEY: "VERY_SECRET_KEY"
+      REDASH_MAIL_USERNAME: "noreply@example.com"
+      REDASH_MAIL_PASSWORD: "dummy"
+    networks:
+      - analytics_net
+
+  redash_worker:
+    image: redash/redash:10.1.0.b50633
+    depends_on:
+      - redash_postgres
+      - redis
+    environment:
+      REDASH_DATABASE_URL: "postgresql://redash:redash_password@redash_postgres/redash"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      QUEUES: "queries,celery"
+      WORKERS_COUNT: 2
+    networks:
+      - analytics_net
+
+  redash_scheduler:
+    image: redash/redash:10.1.0.b50633
+    depends_on:
+      - redash_postgres
+      - redis
+    environment:
+      REDASH_DATABASE_URL: "postgresql://redash:redash_password@redash_postgres/redash"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      QUEUES: "scheduled_queries,schemas,queries,celery"
+      WORKERS_COUNT: 1
+    networks:
+      - analytics_net
+
+  generator:
+    build: ./generator
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_NAME: water_quality
+      DB_USER: user
+      DB_PASSWORD: password
+    networks:
+      - analytics_net
+
+volumes:
+  pgdata:
+
+networks:
+  analytics_net:
+    driver: bridge
