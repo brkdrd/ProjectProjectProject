@@ -12,6 +12,12 @@ services:
       - pgdata:/var/lib/postgresql/data
     networks:
       - analytics_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d water_quality"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   redash_postgres:
     image: postgres:15
@@ -21,17 +27,31 @@ services:
       POSTGRES_DB: redash
     networks:
       - analytics_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redash -d redash"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   redis:
     image: redis:7-alpine
     networks:
       - analytics_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redash_server:
     image: redash/redash:10.1.0.b50633
     depends_on:
-      - redash_postgres
-      - redis
+      redash_postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "5000:5000"
     environment:
@@ -41,14 +61,25 @@ services:
       REDASH_SECRET_KEY: "VERY_SECRET_KEY"
       REDASH_MAIL_USERNAME: "noreply@example.com"
       REDASH_MAIL_PASSWORD: "dummy"
+      REDASH_HOST: "http://localhost:5000"
     networks:
       - analytics_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
 
   redash_worker:
     image: redash/redash:10.1.0.b50633
     depends_on:
-      - redash_postgres
-      - redis
+      redash_postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redash_server:
+        condition: service_healthy
     environment:
       REDASH_DATABASE_URL: "postgresql://redash:redash_password@redash_postgres/redash"
       REDASH_REDIS_URL: "redis://redis:6379/0"
@@ -60,8 +91,12 @@ services:
   redash_scheduler:
     image: redash/redash:10.1.0.b50633
     depends_on:
-      - redash_postgres
-      - redis
+      redash_postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redash_server:
+        condition: service_healthy
     environment:
       REDASH_DATABASE_URL: "postgresql://redash:redash_password@redash_postgres/redash"
       REDASH_REDIS_URL: "redis://redis:6379/0"
@@ -73,12 +108,30 @@ services:
   generator:
     build: ./generator
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DB_HOST: db
       DB_NAME: water_quality
       DB_USER: user
       DB_PASSWORD: password
+    networks:
+      - analytics_net
+
+  redash_init:
+    image: python:3.9-slim
+    depends_on:
+      redash_server:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      generator:
+        condition: service_started
+    volumes:
+      - ./redash_init.py:/app/redash_init.py
+    command: >
+      sh -c "pip install requests && 
+             python /app/redash_init.py"
     networks:
       - analytics_net
 

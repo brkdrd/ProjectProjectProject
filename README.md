@@ -18,3 +18,8 @@ End-to-end система для генерации, хранения и ана�
 git clone https://github.com/brkdrd/ProjectProjectProject.git
 cd water-monitoring
 docker-compose up -d
+
+## Использование редаш
+Аддрес: http://localhost:5000/dashboard/monitoring-kachestva-vody
+Логин: admin@example.com
+Пароль: password
